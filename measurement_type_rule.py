@@ -36,7 +36,8 @@ def main():
             observable_names_dict[name] = name_count
 
         # For each instrument type...
-        for sensor_type, sensor_type_count in sensor_types_dict.items():
+        complete_sensor_types_dict = {**sensor_types_dict, **sensor_technologies_dict}
+        for sensor_type, sensor_type_count in complete_sensor_types_dict.items():
             # Find all measurements the sensors with that type can do
             results = session.run(
                 'MATCH (s:Sensor)-[:OBSERVES]->(o:ObservableProperty) '
@@ -56,16 +57,18 @@ def main():
                     name=observable
                 )
                 intersection_count = results.single().value()
-                # Add a new relation with the confidences
-                result = session.run('MATCH (o:ObservableProperty)'
-                                     'WHERE o.name = {name}'
-                                     'CREATE (st:SensorType {type: {type}})'
-                                     'CREATE (st)-[:OBSERVES {confTypeImpliesObservation: {conf1}, confObservationImpliesType: {conf2}}]->(o)',
-                                     type=sensor_type,
-                                     name=observable,
-                                     conf1=float(intersection_count)/sensor_type_count,
-                                     conf2=float(intersection_count)/observable_names_dict[observable])
-                print(result.summary().counters)
+                if intersection_count > 1:
+                    # Add a new relation with the confidences
+                    result = session.run('MATCH (o:ObservableProperty)'
+                                         'WHERE o.name = {name}'
+                                         'CREATE (st:SensorType {type: {type}})'
+                                         'CREATE (st)-[:OBSERVES {confTypeImpliesObservation: {conf1}, confObservationImpliesType: {conf2}, support:{support}}]->(o)',
+                                         type=sensor_type,
+                                         name=observable,
+                                         conf1=float(intersection_count)/sensor_type_count,
+                                         conf2=float(intersection_count)/observable_names_dict[observable],
+                                         support=intersection_count)
+                    print(result.summary().counters)
 
 
 if __name__ == "__main__":
