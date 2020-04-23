@@ -35,40 +35,63 @@ def main():
             name_count = result[1]
             observable_names_dict[name] = name_count
 
-        # For each instrument type...
+        # Get list of bands
+        results = session.run('MATCH (s:Sensor) RETURN DISTINCT s.wavebands, count(*)')
+        bands_set = set()
+        for band_result in results:
+            bands_list = band_result["s.wavebands"]
+            bands_count = band_result[1]
+            for band in bands_list:
+                if band not in bands_set:
+                    bands_set.add(band)
+
+
+        # For each pair (instrument type, band)...
         complete_sensor_types_dict = {**sensor_types_dict, **sensor_technologies_dict}
         for sensor_type, sensor_type_count in complete_sensor_types_dict.items():
-            # Find all measurements the sensors with that type can do
-            results = session.run(
-                'MATCH (s:Sensor)-[:OBSERVES]->(o:ObservableProperty) '
-                'WHERE {sensor_type} in s.types '
-                'RETURN o.name',
-                sensor_type=sensor_type)
-            observable_subset = set()
-            for result in results:
-                observable_subset.add(result['o.name'])
-            # For each pair (type, observable) count the number of sensors
-            for observable in observable_subset:
+            for sensor_band in bands_set:
+                # ...Find all measurements the sensors with that type and band can do
                 results = session.run(
-                    'MATCH (s:Sensor)-[:OBSERVES]->(o:ObservableProperty) '
-                    'WHERE {sensor_type} in s.types AND o.name = {name} '
+                    'MATCH (s:Sensor) '
+                    'WHERE {sensor_type} in s.types AND {band} in s.wavebands '
                     'RETURN count(s)',
                     sensor_type=sensor_type,
-                    name=observable
-                )
-                intersection_count = results.single().value()
-                if intersection_count > 1:
-                    # Add a new relation with the confidences
-                    result = session.run('MATCH (o:ObservableProperty)'
-                                         'WHERE o.name = {name}'
-                                         'CREATE (st:SensorType {type: {type}})'
-                                         'CREATE (st)-[:OBSERVES {confTypeImpliesObservation: {conf1}, confObservationImpliesType: {conf2}, support:{support}}]->(o)',
-                                         type=sensor_type,
-                                         name=observable,
-                                         conf1=float(intersection_count)/sensor_type_count,
-                                         conf2=float(intersection_count)/observable_names_dict[observable],
-                                         support=intersection_count)
-                    print(result.summary().counters)
+                    band=sensor_band)
+                sensor_type_band_count = results.single().value()
+                results = session.run(
+                    'MATCH (s:Sensor)-[:OBSERVES]->(o:ObservableProperty) '
+                    'WHERE {sensor_type} in s.types AND {band} in s.wavebands '
+                    'RETURN o.name',
+                    sensor_type=sensor_type,
+                    band=sensor_band)
+                observable_subset = set()
+                for result in results:
+                    observable_subset.add(result['o.name'])
+                # For each triplet (type, band, observable) count the number of sensors
+                for observable in observable_subset:
+                    results = session.run(
+                        'MATCH (s:Sensor)-[:OBSERVES]->(o:ObservableProperty) '
+                        'WHERE {sensor_type} in s.types AND {band} in s.wavebands AND o.name = {name} '
+                        'RETURN count(s)',
+                        sensor_type=sensor_type,
+                        band=sensor_band,
+                        name=observable
+                    )
+                    intersection_count = results.single().value()
+                    if intersection_count > 1:
+                        # Add a new relation with the confidences
+                        result = session.run('MATCH (o:ObservableProperty)'
+                                             'WHERE o.name = {name}'
+                                             'CREATE (st:SensorType {name: {rule_name}, type: {type}, waveband: {band}})'
+                                             'CREATE (st)-[:OBSERVES {confTypeImpliesObservation: {conf1}, confObservationImpliesType: {conf2}, support:{support}}]->(o)',
+                                             rule_name=sensor_band + " " + sensor_type,
+                                             type=sensor_type,
+                                             band=sensor_band,
+                                             name=observable,
+                                             conf1=float(intersection_count)/sensor_type_band_count,
+                                             conf2=float(intersection_count)/observable_names_dict[observable],
+                                             support=intersection_count)
+                        print(result.summary().counters)
 
 
 if __name__ == "__main__":
