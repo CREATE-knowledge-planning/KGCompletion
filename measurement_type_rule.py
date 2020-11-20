@@ -3,12 +3,12 @@ from neo4j import GraphDatabase
 
 def main():
     uri = "bolt://localhost:7687"
-    driver = GraphDatabase.driver(uri, auth=("neo4j", "test"))
+    driver = GraphDatabase.driver(uri, auth=("neo4j", "test_create"))
 
     with driver.session() as session:
         # Remove all nodes with SensorType as label
         results = session.run('MATCH (st:SensorType) DETACH DELETE st')
-        print(results.summary().counters)
+        print(results.consume().counters)
         # Get list of sensor types
         results = session.run('MATCH (s:Sensor) RETURN DISTINCT s.types, count(*)')
         sensor_types_dict = {}
@@ -53,14 +53,14 @@ def main():
                 # ...Find all measurements the sensors with that type and band can do
                 results = session.run(
                     'MATCH (s:Sensor) '
-                    'WHERE {sensor_type} in s.types AND {band} in s.wavebands '
+                    'WHERE $sensor_type in s.types AND $band in s.wavebands '
                     'RETURN count(s)',
                     sensor_type=sensor_type,
                     band=sensor_band)
                 sensor_type_band_count = results.single().value()
                 results = session.run(
                     'MATCH (s:Sensor)-[:OBSERVES]->(o:ObservableProperty) '
-                    'WHERE {sensor_type} in s.types AND {band} in s.wavebands '
+                    'WHERE $sensor_type in s.types AND $band in s.wavebands '
                     'RETURN o.name',
                     sensor_type=sensor_type,
                     band=sensor_band)
@@ -71,19 +71,19 @@ def main():
                 for observable in observable_subset:
                     results = session.run(
                         'MATCH (s:Sensor)-[:OBSERVES]->(o:ObservableProperty) '
-                        'WHERE {sensor_type} in s.types AND {band} in s.wavebands AND o.name = {name} '
+                        'WHERE $sensor_type in s.types AND $band in s.wavebands AND o.name = $name '
                         'RETURN count(s)',
                         sensor_type=sensor_type,
                         band=sensor_band,
                         name=observable
                     )
                     intersection_count = results.single().value()
-                    if intersection_count > 1:
+                    if intersection_count > 4:
                         # Add a new relation with the confidences
-                        result = session.run('MATCH (o:ObservableProperty)'
-                                             'WHERE o.name = {name}'
-                                             'CREATE (st:SensorType {name: {rule_name}, type: {type}, waveband: {band}})'
-                                             'CREATE (st)-[:OBSERVES {confTypeImpliesObservation: {conf1}, confObservationImpliesType: {conf2}, support:{support}}]->(o)',
+                        result = session.run('MATCH (o:ObservableProperty) '
+                                             'WHERE o.name = $name '
+                                             'CREATE (st:SensorType {name: $rule_name, type: $type, waveband: $band}) '
+                                             'CREATE (st)-[:OBSERVES {confTypeImpliesObservation: $conf1, confObservationImpliesType: $conf2, support: $support}]->(o)',
                                              rule_name=sensor_band + " " + sensor_type,
                                              type=sensor_type,
                                              band=sensor_band,
@@ -91,7 +91,7 @@ def main():
                                              conf1=float(intersection_count)/sensor_type_band_count,
                                              conf2=float(intersection_count)/observable_names_dict[observable],
                                              support=intersection_count)
-                        print(result.summary().counters)
+                        print(result.consume().counters)
 
 
 if __name__ == "__main__":
